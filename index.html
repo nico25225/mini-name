@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniName</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+        const { jsPDF } = window.jspdf;
+        const { JSZip } = window;
+
+        const A4_WIDTH_MM = 297;
+        const A4_HEIGHT_MM = 210;
+        const SCREEN_DPI = 72;
+        const TEMPLATE_DPI = 600;
+
+        const GRID_COLS = 6;
+        const GRID_ROWS = 3;
+
+        const B4_INNER_TO_PAPER_RATIO_W = 180 / 257;
+        const B4_INNER_TO_PAPER_RATIO_H = 270 / 364;
+        const BLOCK_WIDTH_MM = A4_WIDTH_MM / GRID_COLS;
+        const BLOCK_HEIGHT_MM = A4_HEIGHT_MM / GRID_ROWS;
+        const INNER_FRAME_WIDTH_MM = BLOCK_WIDTH_MM * B4_INNER_TO_PAPER_RATIO_W;
+        const INNER_FRAME_HEIGHT_MM = BLOCK_HEIGHT_MM * B4_INNER_TO_PAPER_RATIO_H;
+
+        function MameNameTool() {
+            const [pages, setPages] = useState([]);
+            const [selectedIndices, setSelectedIndices] = useState([]);
+            const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
+            const [contextMenu, setContextMenu] = useState(null);
+            const [isLoading, setIsLoading] = useState(false);
+            const [loadingMessage, setLoadingMessage] = useState('');
+            const [alertMessage, setAlertMessage] = useState('');
+            const [confirmAction, setConfirmAction] = useState(null);
+
+            const closeContextMenu = useCallback(() => { setContextMenu(null); }, []);
+            useEffect(() => {
+                window.addEventListener('click', closeContextMenu);
+                return () => { window.removeEventListener('click', closeContextMenu); };
+            }, [closeContextMenu]);
+
+            useEffect(() => {
+                const handleKeyDown = (e) => {
+                    if (selectedIndices.length === 0 || lastSelectedIndex === null) return;
+                    
+                    if (e.shiftKey) {
+                        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                            e.preventDefault();
+                            const direction = e.key === 'ArrowLeft' ? 1 : -1;
+                            const targetIndex = lastSelectedIndex + direction;
+                            
+                            if (targetIndex >= 0 && targetIndex < pages.length) {
+                                const newPages = [...pages];
+                                [newPages[lastSelectedIndex], newPages[targetIndex]] = [newPages[targetIndex], newPages[lastSelectedIndex]];
+                                setPages(newPages);
+                                setSelectedIndices([targetIndex]);
+                                setLastSelectedIndex(targetIndex);
+                            }
+                        }
+                        return;
+                    }
+
+                    let nextIndex = lastSelectedIndex;
+                    switch (e.key) {
+                        case 'ArrowUp':
+                            e.preventDefault();
+                            nextIndex -= GRID_COLS;
+                            break;
+                        case 'ArrowDown':
+                            e.preventDefault();
+                            nextIndex += GRID_COLS;
+                            break;
+                        case 'ArrowLeft':
+                            e.preventDefault();
+                            nextIndex += 1;
+                            break;
+                        case 'ArrowRight':
+                            e.preventDefault();
+                            nextIndex -= 1;
+                            break;
+                        default:
+                            return;
+                    }
+
+                    if (nextIndex >= 0 && nextIndex < pages.length) {
+                        setSelectedIndices([nextIndex]);
+                        setLastSelectedIndex(nextIndex);
+                    }
+                };
+
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
+            }, [pages, selectedIndices, lastSelectedIndex]);
+
+            const handlePageClick = (index, e) => {
+                e.stopPropagation();
+                if (e.shiftKey && lastSelectedIndex !== null) {
+                    const start = Math.min(index, lastSelectedIndex);
+                    const end = Math.max(index, lastSelectedIndex);
+                    const newSelection = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+                    setSelectedIndices(newSelection);
+                } else if (e.ctrlKey || e.metaKey) {
+                    const newSelection = selectedIndices.includes(index)
+                        ? selectedIndices.filter(i => i !== index)
+                        : [...selectedIndices, index];
+                    setSelectedIndices(newSelection);
+                    setLastSelectedIndex(index);
+                } else {
+                    setSelectedIndices([index]);
+                    setLastSelectedIndex(index);
+                }
+            };
+
+            const handleCreateTemplate = () => {
+                setIsLoading(true);
+                setLoadingMessage('高解像度テンプレートを作成中...');
+                setTimeout(() => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = A4_WIDTH_MM / 25.4 * TEMPLATE_DPI;
+                        canvas.height = A4_HEIGHT_MM / 25.4 * TEMPLATE_DPI;
+                        const ctx = canvas.getContext('2d');
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                        const blockWidthPx = canvas.width / GRID_COLS;
+                        const blockHeightPx = canvas.height / GRID_ROWS;
+                        const innerFrameWidthPx = INNER_FRAME_WIDTH_MM / 25.4 * TEMPLATE_DPI;
+                        const innerFrameHeightPx = INNER_FRAME_HEIGHT_MM / 25.4 * TEMPLATE_DPI;
+                        
+                        ctx.strokeStyle = '#000000';
+                        ctx.lineWidth = Math.max(1, Math.round(TEMPLATE_DPI / SCREEN_DPI));
+
+                        for (let row = 0; row < GRID_ROWS; row++) {
+                            for (let col = 0; col < GRID_COLS; col++) {
+                                const x = col * blockWidthPx;
+                                const y = row * blockHeightPx;
+                                const innerX = x + (blockWidthPx - innerFrameWidthPx) / 2;
+                                const innerY = y + (blockHeightPx - innerFrameHeightPx) / 2;
+                                ctx.strokeRect(innerX, innerY, innerFrameWidthPx, innerFrameHeightPx);
+                            }
+                        }
+
+                        const link = document.createElement('a');
+                        link.download = 'mame-name-template-600dpi.png';
+                        link.href = canvas.toDataURL('image/png');
+                        link.click();
+                    } catch (error) {
+                        setAlertMessage("テンプレートの作成に失敗しました。");
+                    } finally {
+                        setIsLoading(false);
+                    }
+                }, 50);
+            };
+
+            const handleFileUpload = (e) => {
+                const files = Array.from(e.target.files);
+                if (!files.length) return;
+                e.target.value = '';
+                setIsLoading(true);
+                setLoadingMessage('画像を準備中...');
+
+                const processFile = (file) => new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            const blockWidth = img.width / GRID_COLS;
+                            const blockHeight = img.height / GRID_ROWS;
+                            if (!isFinite(blockWidth) || !isFinite(blockHeight)) return reject(new Error(`ファイル「${file.name}」のサイズが不正です。`));
+                            const canvas = document.createElement('canvas');
+                            canvas.width = blockWidth;
+                            canvas.height = blockHeight;
+                            const ctx = canvas.getContext('2d');
+                            const splitPages = [];
+                            for (let row = 0; row < GRID_ROWS; row++) {
+                                for (let col = GRID_COLS - 1; col >= 0; col--) {
+                                    ctx.clearRect(0, 0, blockWidth, blockHeight);
+                                    ctx.drawImage(img, col * blockWidth, row * blockHeight, blockWidth, blockHeight, 0, 0, blockWidth, blockHeight);
+                                    splitPages.push({ id: crypto.randomUUID(), dataUrl: canvas.toDataURL('image/png') });
+                                }
+                            }
+                            resolve(splitPages);
+                        };
+                        img.onerror = () => reject(new Error(`「${file.name}」の読み込みに失敗。`));
+                        img.src = event.target.result;
+                    };
+                    reader.onerror = () => reject(new Error(`ファイルリーダーが「${file.name}」の読み込みに失敗。`));
+                    reader.readAsDataURL(file);
+                });
+
+                const run = async () => {
+                    try {
+                        const pageArrays = [];
+                        for(let i = 0; i < files.length; i++) {
+                            setLoadingMessage(`画像を分割中... (${i + 1}/${files.length})`);
+                            pageArrays.push(await processFile(files[i]));
+                        }
+                        setPages(prev => [...prev, ...pageArrays.flat()]);
+                    } catch (error) {
+                        setAlertMessage(error.message);
+                    } finally {
+                        setIsLoading(false);
+                        setLoadingMessage('');
+                    }
+                };
+                run();
+            };
+
+            const handleContextMenu = (e, index) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!selectedIndices.includes(index)) {
+                    setSelectedIndices([index]);
+                    setLastSelectedIndex(index);
+                }
+                setContextMenu({ x: e.pageX, y: e.pageY, index });
+            };
+
+            const insertPage = (index, position) => {
+                const newPage = { id: crypto.randomUUID(), dataUrl: null };
+                const newPages = [...pages];
+                const insertIndex = position === 'before' ? index : index + 1;
+                newPages.splice(insertIndex, 0, newPage);
+                setPages(newPages);
+            };
+
+            const deletePage = (index) => {
+                setConfirmAction({
+                    message: `${selectedIndices.length}個のコマを本当に削除しますか？`,
+                    onConfirm: () => {
+                        const newPages = pages.filter((_, i) => !selectedIndices.includes(i));
+                        setPages(newPages);
+                        setSelectedIndices([]);
+                        setLastSelectedIndex(null);
+                    }
+                });
+            };
+
+            const handleSaveTemplateImage = () => {
+                const sortedSelection = [...selectedIndices].sort((a, b) => a - b);
+                const isContiguous = sortedSelection.every((val, i, arr) => i === 0 || val === arr[i-1] + 1);
+                
+                if (sortedSelection.length === 0 || sortedSelection.length % 18 !== 0 || !isContiguous) {
+                    setAlertMessage("連続した18の倍数個のコマを選択した場合のみ、1枚絵で保存できます。");
+                    return;
+                }
+                
+                setIsLoading(true);
+                setLoadingMessage('画像を生成中...');
+                
+                setTimeout(() => {
+                    const canvas = document.createElement('canvas');
+                    const canvasDpi = SCREEN_DPI;
+                    canvas.width = A4_WIDTH_MM / 25.4 * canvasDpi;
+                    canvas.height = A4_HEIGHT_MM / 25.4 * canvasDpi;
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    const blockWidthPx = canvas.width / GRID_COLS;
+                    const blockHeightPx = canvas.height / GRID_ROWS;
+                    const targetPages = sortedSelection.map(index => pages[index]);
+                    const drawPromises = [];
+                    
+                    ctx.strokeStyle = '#000000';
+                    ctx.lineWidth = Math.max(1, Math.round(TEMPLATE_DPI / SCREEN_DPI)) / 4; 
+                    ctx.beginPath();
+                    for(let i = 1; i < GRID_COLS; i++) {
+                      ctx.moveTo(i * blockWidthPx, 0);
+                      ctx.lineTo(i * blockWidthPx, canvas.height);
+                    }
+                    for(let i = 1; i < GRID_ROWS; i++) {
+                      ctx.moveTo(0, i * blockHeightPx);
+                      ctx.lineTo(canvas.width, i * blockHeightPx);
+                    }
+                    ctx.stroke();
+
+                    for (let i = 0; i < targetPages.length; i++) {
+                        const page = targetPages[i];
+                        const row = Math.floor(i / GRID_COLS);
+                        const colInPreview = i % GRID_COLS;
+                        const colInTemplate = GRID_COLS - 1 - colInPreview;
+                        const x = colInTemplate * blockWidthPx;
+                        const y = row * blockHeightPx;
+
+                        if (page && page.dataUrl) {
+                            const promise = new Promise(resolve => {
+                                const img = new Image();
+                                img.onload = () => { ctx.drawImage(img, x, y, blockWidthPx, blockHeightPx); resolve(); };
+                                img.onerror = resolve;
+                                img.src = page.dataUrl;
+                            });
+                            drawPromises.push(promise);
+                        }
+                    }
+
+                    Promise.all(drawPromises).then(() => {
+                        const link = document.createElement('a');
+                        const pageStartNum = sortedSelection[0] + 1;
+                        const pageEndNum = sortedSelection[sortedSelection.length - 1] + 1;
+                        link.download = `mame-name_${pageStartNum}-${pageEndNum}.png`;
+                        link.href = canvas.toDataURL('image/png');
+                        link.click();
+                        setIsLoading(false);
+                    });
+                }, 50);
+            };
+            
+            const handleSaveSelectedAsZip = () => {
+                if (selectedIndices.length === 0) {
+                    setAlertMessage('保存するコマが選択されていません。');
+                    return;
+                }
+                if (!JSZip) {
+                    setAlertMessage('ZIP生成ライブラリの読み込みに失敗しました。');
+                    return;
+                }
+
+                setIsLoading(true);
+                setLoadingMessage('ZIPファイルを生成中...');
+
+                setTimeout(async () => {
+                    try {
+                        const zip = new JSZip();
+                        selectedIndices.forEach((index) => {
+                            const page = pages[index];
+                            if (page && page.dataUrl) {
+                                const pageNumber = String(index + 1).padStart(3, '0');
+                                const fileName = `koma_${pageNumber}.png`;
+                                const base64Data = page.dataUrl.split(',')[1];
+                                zip.file(fileName, base64Data, { base64: true });
+                            }
+                        });
+
+                        const content = await zip.generateAsync({ type: "blob" });
+                        const link = document.createElement('a');
+                        link.href = URL.createObjectURL(content);
+                        link.download = 'mame-name_selected-koma.zip';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        URL.revokeObjectURL(link.href);
+                    } catch (error) {
+                        setAlertMessage("ZIPファイルの生成に失敗しました。");
+                    } finally {
+                        setIsLoading(false);
+                    }
+                }, 50);
+            };
+
+            const handleExportPDF = (isBooklet) => {
+                 if (pages.length === 0) {
+                    setAlertMessage('PDF化するコマがありません。');
+                    return;
+                }
+                setIsLoading(true);
+                setLoadingMessage('PDFを生成中...');
+
+                setTimeout(() => {
+                    try {
+                        const doc = new jsPDF({ orientation: isBooklet ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
+                        if (isBooklet) {
+                            for (let i = 0; i < pages.length; i += 2) {
+                                if (i > 0) doc.addPage('a4', 'landscape');
+                                const pageRight = pages[i];
+                                const pageLeft = pages[i + 1];
+                                if (pageRight && pageRight.dataUrl) doc.addImage(pageRight.dataUrl, 'PNG', A4_WIDTH_MM / 2, 0, A4_WIDTH_MM / 2, A4_HEIGHT_MM);
+                                if (pageLeft && pageLeft.dataUrl) doc.addImage(pageLeft.dataUrl, 'PNG', 0, 0, A4_WIDTH_MM / 2, A4_HEIGHT_MM);
+                            }
+                        } else {
+                            pages.forEach((page, index) => {
+                                if (index > 0) doc.addPage('a4', 'portrait');
+                                if (page.dataUrl) doc.addImage(page.dataUrl, 'PNG', 0, 0, A4_HEIGHT_MM, A4_WIDTH_MM);
+                            });
+                        }
+                        doc.save('mame-name.pdf');
+                    } catch (error) {
+                        setAlertMessage("PDFの生成に失敗しました。");
+                    } finally {
+                        setIsLoading(false);
+                    }
+                }, 50);
+            };
+
+            const buttonStyle = "bg-blue-400 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded shadow w-full disabled:bg-blue-200 disabled:cursor-not-allowed";
+
+            return (
+                <div className="container mx-auto p-4 md:p-8" onClick={() => setSelectedIndices([])}>
+                    {isLoading && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"><div className="bg-white p-6 rounded-lg shadow-xl text-center"><p className="text-lg font-semibold">{loadingMessage}</p></div></div>)}
+                    {alertMessage && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setAlertMessage('')}><div className="bg-white p-8 rounded-lg shadow-xl text-center max-w-sm" onClick={e => e.stopPropagation()}><p className="text-lg mb-6">{alertMessage}</p><button onClick={() => setAlertMessage('')} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded">OK</button></div></div>)}
+                    {confirmAction && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setConfirmAction(null)}><div className="bg-white p-8 rounded-lg shadow-xl text-center max-w-sm" onClick={e => e.stopPropagation()}><p className="text-lg mb-6">{confirmAction.message}</p><div className="flex justify-center gap-4"><button onClick={() => setConfirmAction(null)} className="bg-gray-300 hover:bg-gray-400 text-black font-bold py-2 px-4 rounded">キャンセル</button><button onClick={() => { confirmAction.onConfirm(); setConfirmAction(null); }} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">実行</button></div></div></div>)}
+                    
+                    <h1 className="text-3xl md:text-4xl font-bold text-center mb-6">漫画豆ネームツール</h1>
+
+                    <div className="bg-white p-6 rounded-lg shadow-md mb-8">
+                        <h2 className="text-2xl font-bold mb-4 border-b pb-2">1. テンプレート作成 & アップロード</h2>
+                        <div className="flex flex-wrap gap-4 items-center">
+                            <button onClick={handleCreateTemplate} className="bg-blue-400 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded shadow">豆ネームテンプレート(600dpi)を作成</button>
+                            <div>
+                                <label htmlFor="file-upload" className="cursor-pointer bg-blue-400 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded shadow">ネーム画像(PNG/JPG)をアップロード</label>
+                                <input id="file-upload" type="file" multiple accept="image/png, image/jpeg" className="hidden" onChange={handleFileUpload} />
+                            </div>
+                        </div>
+                         <p className="text-sm text-gray-600 mt-4">作成したテンプレートに描き込んだ画像や、18コマ単位で作成した画像をアップロードしてください。</p>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-lg shadow-md mb-8">
+                        <h2 className="text-2xl font-bold mb-4 border-b pb-2">2. プレビュー & 編集 ({pages.length}コマ)</h2>
+                        {pages.length === 0 ? (
+                            <p className="text-gray-500 text-center py-8">ここにアップロードしたコマが表示されます。</p>
+                        ) : (
+                            <div className="grid grid-cols-6 gap-4" style={{ direction: 'rtl', userSelect: 'none' }}>
+                                {pages.map((page, index) => {
+                                    const isSelected = selectedIndices.includes(index);
+                                    return (
+                                        <div 
+                                            key={page.id} 
+                                            className={`relative rounded-md overflow-hidden aspect-[34.63/51.92] group cursor-pointer border-2 ${isSelected ? 'border-blue-500 ring-2 ring-blue-500' : 'border-gray-300'}`}
+                                            style={{ direction: 'ltr' }} 
+                                            onClick={(e) => handlePageClick(index, e)}
+                                            onContextMenu={(e) => handleContextMenu(e, index)}
+                                        >
+                                            <div className="absolute top-0 left-0 bg-black bg-opacity-70 text-white text-xs px-1.5 py-0.5 rounded-br-md z-10">{index + 1}</div>
+                                            {page.dataUrl ? (<img src={page.dataUrl} alt={`コマ ${index + 1}`} className="w-full h-full object-contain" />) : (<div className="w-full h-full bg-gray-200 flex items-center justify-center"><span className="text-gray-500 text-sm">白紙</span></div>)}
+                                            <div className={`absolute inset-0 bg-black transition-all ${isSelected ? 'bg-opacity-20' : 'bg-opacity-0'}`}></div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                    
+                    {contextMenu && (<div style={{ top: contextMenu.y, left: contextMenu.x }} className="absolute bg-white border border-gray-300 rounded-md shadow-lg z-20 text-sm"><div className="p-1 font-bold border-b text-center">コマ {contextMenu.index + 1}</div><button onClick={() => insertPage(contextMenu.index, 'before')} className="block w-full text-left px-4 py-2 hover:bg-gray-100">前に挿入</button><button onClick={() => insertPage(contextMenu.index, 'after')} className="block w-full text-left px-4 py-2 hover:bg-gray-100">後ろに挿入</button><button onClick={() => deletePage(contextMenu.index)} className="block w-full text-left px-4 py-2 text-red-600 hover:bg-red-50">選択コマを削除</button></div>)}
+
+                    <div className="bg-white p-6 rounded-lg shadow-md">
+                        <h2 className="text-2xl font-bold mb-4 border-b pb-2">3. 保存 & PDF出力</h2>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                            <div>
+                                <h3 className="text-lg font-semibold mb-2">① 範囲を画像保存 (PNG)</h3>
+                                <button onClick={handleSaveTemplateImage} className={buttonStyle} disabled={selectedIndices.length === 0}>選択範囲を1枚絵で保存</button>
+                                <p className="text-sm text-gray-600 mt-2">連続した18の倍数個のコマを選択している場合のみ保存できます。</p>
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-semibold mb-2">② 選択コマを個別保存 (ZIP)</h3>
+                                <button onClick={handleSaveSelectedAsZip} className={buttonStyle} disabled={selectedIndices.length === 0}>選択コマをZIPで保存</button>
+                                <p className="text-sm text-gray-600 mt-2">選択中の全てのコマを個別のPNGファイルとしてZIP形式で保存します。</p>
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-semibold mb-2">③ PDF形式で出力 (全コマ)</h3>
+                                <div className="flex flex-col gap-4">
+                                    <button onClick={() => handleExportPDF(false)} className={buttonStyle} disabled={pages.length === 0}>単ページ形式で出力</button>
+                                    <button onClick={() => handleExportPDF(true)} className={buttonStyle} disabled={pages.length === 0}>見開き形式で出力</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <footer className="text-center text-gray-500 mt-8 text-sm"><p>Mame Name Tool</p></footer>
+                </div>
+            );
+        }
+
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<MameNameTool />);
+    </script>
+</body>
+</html>
