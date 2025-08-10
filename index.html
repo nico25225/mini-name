@@ -400,10 +400,10 @@
                     {alertMessage && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setAlertMessage('')}><div className="bg-white p-8 rounded-lg shadow-xl text-center max-w-sm" onClick={e => e.stopPropagation()}><p className="text-lg mb-6">{alertMessage}</p><button onClick={() => setAlertMessage('')} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded">OK</button></div></div>)}
                     {confirmAction && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setConfirmAction(null)}><div className="bg-white p-8 rounded-lg shadow-xl text-center max-w-sm" onClick={e => e.stopPropagation()}><p className="text-lg mb-6">{confirmAction.message}</p><div className="flex justify-center gap-4"><button onClick={() => setConfirmAction(null)} className="bg-gray-300 hover:bg-gray-400 text-black font-bold py-2 px-4 rounded">キャンセル</button><button onClick={() => { confirmAction.onConfirm(); setConfirmAction(null); }} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">実行</button></div></div></div>)}
                     
-                    <h1 className="text-3xl md:text-4xl font-bold text-center mb-6">漫画豆ネームツール</h1>
+                    <h1 className="text-3xl md:text-4xl font-bold text-center mb-6">mini name</h1>
 
                     <div className="bg-white p-6 rounded-lg shadow-md mb-8">
-                        <h2 className="text-2xl font-bold mb-4 border-b pb-2">1. テンプレート作成 & アップロード</h2>
+                        <h2 className="text-2xl font-bold mb-4 border-b pb-2">テンプレート作成 & アップロード</h2>
                         <div className="flex flex-wrap gap-4 items-center">
                             <button onClick={handleCreateTemplate} className="bg-blue-400 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded shadow">豆ネームテンプレート(600dpi)を作成</button>
                             <div>
@@ -415,7 +415,7 @@
                     </div>
 
                     <div className="bg-white p-6 rounded-lg shadow-md mb-8">
-                        <h2 className="text-2xl font-bold mb-4 border-b pb-2">2. プレビュー & 編集 ({pages.length}コマ)</h2>
+                        <h2 className="text-2xl font-bold mb-4 border-b pb-2">プレビュー & 編集 ({pages.length}コマ)</h2>
                         {pages.length === 0 ? (
                             <p className="text-gray-500 text-center py-8">ここにアップロードしたコマが表示されます。</p>
                         ) : (
@@ -443,20 +443,20 @@
                     {contextMenu && (<div style={{ top: contextMenu.y, left: contextMenu.x }} className="absolute bg-white border border-gray-300 rounded-md shadow-lg z-20 text-sm"><div className="p-1 font-bold border-b text-center">コマ {contextMenu.index + 1}</div><button onClick={() => insertPage(contextMenu.index, 'before')} className="block w-full text-left px-4 py-2 hover:bg-gray-100">前に挿入</button><button onClick={() => insertPage(contextMenu.index, 'after')} className="block w-full text-left px-4 py-2 hover:bg-gray-100">後ろに挿入</button><button onClick={() => deletePage(contextMenu.index)} className="block w-full text-left px-4 py-2 text-red-600 hover:bg-red-50">選択コマを削除</button></div>)}
 
                     <div className="bg-white p-6 rounded-lg shadow-md">
-                        <h2 className="text-2xl font-bold mb-4 border-b pb-2">3. 保存 & PDF出力</h2>
+                        <h2 className="text-2xl font-bold mb-4 border-b pb-2">保存 & PDF出力</h2>
                         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
                             <div>
-                                <h3 className="text-lg font-semibold mb-2">① 範囲を画像保存 (PNG)</h3>
+                                <h3 className="text-lg font-semibold mb-2">範囲を画像保存 (PNG)</h3>
                                 <button onClick={handleSaveTemplateImage} className={buttonStyle} disabled={selectedIndices.length === 0}>選択範囲を1枚絵で保存</button>
                                 <p className="text-sm text-gray-600 mt-2">連続した18の倍数個のコマを選択している場合のみ保存できます。</p>
                             </div>
                             <div>
-                                <h3 className="text-lg font-semibold mb-2">② 選択コマを個別保存 (ZIP)</h3>
+                                <h3 className="text-lg font-semibold mb-2">選択コマをZIPで保存</h3>
                                 <button onClick={handleSaveSelectedAsZip} className={buttonStyle} disabled={selectedIndices.length === 0}>選択コマをZIPで保存</button>
                                 <p className="text-sm text-gray-600 mt-2">選択中の全てのコマを個別のPNGファイルとしてZIP形式で保存します。</p>
                             </div>
                             <div>
-                                <h3 className="text-lg font-semibold mb-2">③ PDF形式で出力 (全コマ)</h3>
+                                <h3 className="text-lg font-semibold mb-2">PDF形式で出力</h3>
                                 <div className="flex flex-col gap-4">
                                     <button onClick={() => handleExportPDF(false)} className={buttonStyle} disabled={pages.length === 0}>単ページ形式で出力</button>
                                     <button onClick={() => handleExportPDF(true)} className={buttonStyle} disabled={pages.length === 0}>見開き形式で出力</button>
